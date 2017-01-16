@@ -16,5 +16,11 @@
 #include <layout.h> /* From sim-static: Built-in simulation library over SDL */
 #include <pearl-m68k.h> /* From sim-static: Built-in simulation library over SDL */
 #include <pixel.h> /* From sim-static: Built-in simulation library over SDL */
+#include <sndfile.h>
+#include <fftw3.h>
+
+#define XSIG_SOURCE_FFTW_PREFIX fftw
+#define XSIG_SNDFILE_READ sf_read_double
+#define XSIG_FFTW(method) JOIN(XSIG_SOURCE_FFTW_PREFIX, method)
 
 #endif /* _MAIN_INCLUDE_H */

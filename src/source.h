@@ -22,12 +22,7 @@
 #define _SOURCE_H
 #include <sigutils/sigutils.h>
 #include <util/util.h>
-#include <sndfile.h>
-#include <fftw3.h>
-
-#define XSIG_SOURCE_FFTW_PREFIX fftw
-#define XSIG_SNDFILE_READ sf_read_double
-#define XSIG_FFTW(method) JOIN(XSIG_SOURCE_FFTW_PREFIX, method)
+#include <xsigtool.h>
 
 struct xsig_source;
 

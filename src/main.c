@@ -22,20 +22,26 @@
 #include "constellation.h"
 #include "waterfall.h"
 #include "source.h"
+#include "chandetect.h"
 
 #define SCREEN_WIDTH  640
 #define SCREEN_HEIGHT 480
 
 struct xsig_interface {
   xsig_waterfall_t *wf;
+  xsig_channel_detector_t *cd;
 };
 
 SUPRIVATE void
 xsigtool_onacquire(struct xsig_source *source, void *private)
 {
+  unsigned int i;
   struct xsig_interface *iface = (struct xsig_interface *) private;
 
   xsig_waterfall_feed(iface->wf, source->fft);
+
+  for (i = 0; i < source->params.window_size; ++i)
+    xsig_channel_detector_feed(iface->cd, source->window[i]);
 }
 
 SUBOOL
@@ -138,6 +144,8 @@ main(int argc, char *argv[])
   su_modem_t *modem = NULL;
   struct xsig_constellation_params cons_params = xsig_constellation_params_INITIALIZER;
   struct xsig_waterfall_params wf_params;
+  struct xsig_channel_detector_params cd_params =
+      xsig_channel_detector_params_INITIALIZER;
   xsig_constellation_t *cons = NULL;
   textarea_t *area;
   display_t *disp;
@@ -212,6 +220,14 @@ main(int argc, char *argv[])
 
   if ((interface.wf = xsig_waterfall_new(&wf_params)) == NULL) {
     fprintf(stderr, "%s: cannot create waterfall\n", argv[0]);
+    exit(EXIT_FAILURE);
+  }
+
+  cd_params.samp_rate = instance->samp_rate;
+  cd_params.alpha = 1e-2;
+
+  if ((interface.cd = xsig_channel_detector_new(&cd_params)) == NULL) {
+    fprintf(stderr, "%s: cannot create channel detector\n", argv[0]);
     exit(EXIT_FAILURE);
   }
 
