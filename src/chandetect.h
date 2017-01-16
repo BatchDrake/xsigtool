@@ -54,6 +54,13 @@ struct xsig_channel_detector_params {
   8,    /* max_order */   \
 }
 
+
+struct xsig_channel {
+  SUFLOAT fc;
+  SUFLOAT bw;
+  SUFLOAT snr;
+};
+
 struct xsig_channel_detector {
   struct xsig_channel_detector_params params;
   su_ncqo_t lo; /* Local oscillator */
@@ -64,18 +71,18 @@ struct xsig_channel_detector {
   SUFLOAT *averaged_fft;
   unsigned int decim_ptr;
   unsigned int ptr; /* Sample in window */
+  unsigned int iters;
+  PTR_LIST(struct xsig_channel, channel);
 };
 
 typedef struct xsig_channel_detector xsig_channel_detector_t;
 
-struct xsig_channel {
-  SUFLOAT fc;
-  SUFLOAT bw;
-  SUFLOAT snr;
-};
-
 xsig_channel_detector_t *xsig_channel_detector_new(const struct xsig_channel_detector_params *params);
 void xsig_channel_detector_destroy(xsig_channel_detector_t *detector);
 SUBOOL xsig_channel_detector_feed(xsig_channel_detector_t *detector, SUCOMPLEX samp);
+void xsig_channel_detector_get_channel_list(
+    const xsig_channel_detector_t *detector,
+    struct xsig_channel ***channel_list,
+    unsigned int *channel_count);
 
 #endif /* _CHANDETECT_H */

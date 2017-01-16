@@ -55,6 +55,64 @@
  *    be reset and start again.
  */
 
+SUPRIVATE void
+xsig_channel_detector_channel_list_clear(xsig_channel_detector_t *detector)
+{
+  struct xsig_channel *chan;
+
+  FOR_EACH_PTR(chan, detector, channel)
+    free(chan);
+
+  if (detector->channel_list != NULL)
+    free(detector->channel_list);
+
+  detector->channel_count = 0;
+  detector->channel_list  = NULL;
+}
+
+struct xsig_channel *
+xsig_channel_detector_lookup_channel(
+    const xsig_channel_detector_t *detector,
+    SUFLOAT fc)
+{
+  struct xsig_channel *chan;
+
+  FOR_EACH_PTR(chan, detector, channel)
+    if (fc >= chan->fc - chan->bw * .5 &&
+        fc <= chan->fc + chan->bw * .5)
+      return chan;
+
+  return NULL;
+}
+
+SUPRIVATE SUBOOL
+xsig_channel_detector_assert_channel(
+    xsig_channel_detector_t *detector,
+    SUFLOAT fc,
+    SUFLOAT bw,
+    SUFLOAT snr)
+{
+  struct xsig_channel *chan = NULL;
+
+  if ((chan = xsig_channel_detector_lookup_channel(detector, fc)) == NULL) {
+    if ((chan = malloc(sizeof (struct xsig_channel))) == NULL)
+      return SU_FALSE;
+
+    chan->bw = bw;
+    chan->fc = fc;
+    chan->snr = snr;
+
+    if (PTR_LIST_APPEND_CHECK(detector->channel, chan) == -1) {
+      free(chan);
+      return SU_FALSE;
+    }
+  } else
+    if (bw > chan->bw)
+      chan->bw = bw;
+
+  return SU_TRUE;
+}
+
 void
 xsig_channel_detector_destroy(xsig_channel_detector_t *detector)
 {
@@ -70,7 +128,19 @@ xsig_channel_detector_destroy(xsig_channel_detector_t *detector)
   if (detector->averaged_fft != NULL)
     free(detector->averaged_fft);
 
+  xsig_channel_detector_channel_list_clear(detector);
+
   free(detector);
+}
+
+void
+xsig_channel_detector_get_channel_list(
+    const xsig_channel_detector_t *detector,
+    struct xsig_channel ***channel_list,
+    unsigned int *channel_count)
+{
+  *channel_list = detector->channel_list;
+  *channel_count = detector->channel_count;
 }
 
 xsig_channel_detector_t *
@@ -148,6 +218,8 @@ xsig_channel_perform_discovery(xsig_channel_detector_t *detector)
   SUFLOAT min = INFINITY;
   SUFLOAT max = -INFINITY;
 
+  SUFLOAT chan_start;
+  SUFLOAT chan_end;
   SUFLOAT curr_max;
 
   /* Analyze signal's dynamic range */
@@ -159,35 +231,39 @@ xsig_channel_perform_discovery(xsig_channel_detector_t *detector)
       max = detector->averaged_fft[i];
   }
 
-  curr_max = .5 * max + .5 * min;
+  curr_max = .15 * max + .85 * min;
 
-  SU_INFO(
-      "----------- Channels %d/%d --------------\n",
-      detector->params.samp_rate,
-      detector->params.decimation);
+  if (++detector->iters > 1. / detector->params.alpha) {
+    xsig_channel_detector_channel_list_clear(detector);
 
-  for (i = 0; i < (detector->params.window_size >> 1); ++i) {
-    if (detector->averaged_fft[i] > curr_max) {
-      if (!in_channel) {
-        SU_INFO(
-            "Channel start (%lg Hz)\n",
-            SU_NORM2ABS_FREQ(
-                detector->params.samp_rate * detector->params.decimation,
-                2 * (SUFLOAT) i / (SUFLOAT) detector->params.window_size));
-        in_channel = SU_TRUE;
-      }
-    } else {
-      if (in_channel) {
-        SU_INFO(
-            "Channel stop  (%lg Hz)\n",
-            SU_NORM2ABS_FREQ(
-                detector->params.samp_rate * detector->params.decimation,
-                2 * (SUFLOAT) i / (SUFLOAT) detector->params.window_size));
-        in_channel = SU_FALSE;
+    for (i = 0; i < (detector->params.window_size >> 1); ++i) {
+      if (detector->averaged_fft[i] > curr_max) {
+        if (!in_channel) {
+          chan_start = SU_NORM2ABS_FREQ(
+              detector->params.samp_rate * detector->params.decimation,
+              2 * (SUFLOAT) i / (SUFLOAT) detector->params.window_size);
+          in_channel = SU_TRUE;
+        }
+      } else {
+        if (in_channel) {
+          chan_end = SU_NORM2ABS_FREQ(
+              detector->params.samp_rate * detector->params.decimation,
+              2 * (SUFLOAT) i / (SUFLOAT) detector->params.window_size);
+
+          if (!xsig_channel_detector_assert_channel(
+              detector,
+              .5 * (chan_end + chan_start),
+              chan_end - chan_start,
+              0)) {
+            SU_ERROR("Failed to register a channel\n");
+            return SU_FALSE;
+          }
+
+          in_channel = SU_FALSE;
+        }
       }
     }
   }
-  SU_INFO("----------- End of channel analysis --------------\n");
 
   return SU_TRUE;
 }

@@ -126,7 +126,7 @@ xsig_modem_init(const char *file, struct xsig_source **instance)
 
   su_modem_set_int(modem, "mf_span", 6);
   su_modem_set_float(modem, "baud", 468);
-  su_modem_set_float(modem, "fc", 910);
+  su_modem_set_float(modem, "fc", 909);
   su_modem_set_float(modem, "rolloff", .35);
 
   if (!su_modem_start(modem)) {
@@ -136,6 +136,60 @@ xsig_modem_init(const char *file, struct xsig_source **instance)
   }
 
   return modem;
+}
+
+SUPRIVATE void
+xsigtool_redraw_channels(display_t *disp, const struct xsig_interface *iface)
+{
+  struct xsig_channel **channel_list;
+  unsigned int channel_count;
+  unsigned int i;
+  unsigned int a, b;
+
+  xsig_channel_detector_get_channel_list(
+      iface->cd,
+      &channel_list,
+      &channel_count);
+
+  fbox(
+      disp,
+      iface->wf->params.x,
+      iface->wf->params.y + iface->wf->params.height + 2,
+      iface->wf->params.x + iface->wf->params.width,
+      iface->wf->params.y + iface->wf->params.height + 2 + 8 * 8,
+      OPAQUE(0));
+
+  for (i = 0; i < channel_count; ++i)
+    if (channel_list[i] != NULL) {
+      a = iface->wf->params.width
+          * SU_ABS2NORM_FREQ(
+              iface->cd->params.samp_rate,
+              iface->cd->params.decimation
+              * (channel_list[i]->fc - channel_list[i]->bw * .5));
+      b = iface->wf->params.width
+          * SU_ABS2NORM_FREQ(
+              iface->cd->params.samp_rate,
+              iface->cd->params.decimation
+              * (channel_list[i]->fc + channel_list[i]->bw * .5));
+
+      fbox(
+          disp,
+          iface->wf->params.x + a,
+          iface->wf->params.y + 1,
+          iface->wf->params.x + b,
+          iface->wf->params.y + iface->wf->params.height - 1,
+          0x7f00ff00);
+      display_printf(
+          disp,
+          iface->wf->params.x,
+          iface->wf->params.y + iface->wf->params.height + 3 + i * 8,
+          OPAQUE(0x7f7f7f),
+          OPAQUE(0),
+          "Channel %d: %lg Hz (bw: %lg Hz)",
+          i,
+          channel_list[i]->fc,
+          channel_list[i]->bw);
+    }
 }
 
 int
@@ -247,6 +301,7 @@ main(int argc, char *argv[])
     if (++count % cons_params.history_size == 0) {
       xsig_constellation_redraw(cons, disp);
       xsig_waterfall_redraw(interface.wf, disp);
+      xsigtool_redraw_channels(disp, &interface);
       display_printf(
           disp,
           2,
