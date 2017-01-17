@@ -23,12 +23,14 @@
 #include "waterfall.h"
 #include "source.h"
 #include "chandetect.h"
+#include "spectrum.h"
 
 #define SCREEN_WIDTH  640
 #define SCREEN_HEIGHT 480
 
 struct xsig_interface {
   xsig_waterfall_t *wf;
+  xsig_spectrum_t *s;
   xsig_channel_detector_t *cd;
 };
 
@@ -39,6 +41,7 @@ xsigtool_onacquire(struct xsig_source *source, void *private)
   struct xsig_interface *iface = (struct xsig_interface *) private;
 
   xsig_waterfall_feed(iface->wf, source->fft);
+  xsig_spectrum_feed(iface->s, source->fft);
 
   for (i = 0; i < source->params.window_size; ++i)
     xsig_channel_detector_feed(iface->cd, source->window[i]);
@@ -126,7 +129,7 @@ xsig_modem_init(const char *file, struct xsig_source **instance)
 
   su_modem_set_int(modem, "mf_span", 6);
   su_modem_set_float(modem, "baud", 468);
-  su_modem_set_float(modem, "fc", 909);
+  su_modem_set_float(modem, "fc", 910);
   su_modem_set_float(modem, "rolloff", .35);
 
   if (!su_modem_start(modem)) {
@@ -153,10 +156,10 @@ xsigtool_redraw_channels(display_t *disp, const struct xsig_interface *iface)
 
   fbox(
       disp,
-      iface->wf->params.x,
-      iface->wf->params.y + iface->wf->params.height + 2,
-      iface->wf->params.x + iface->wf->params.width,
-      iface->wf->params.y + iface->wf->params.height + 2 + 8 * 8,
+      iface->s->params.x,
+      iface->s->params.y + iface->s->params.height + 2,
+      iface->s->params.x + iface->s->params.width,
+      iface->s->params.y + iface->s->params.height + 2 + 8 * 8,
       OPAQUE(0));
 
   for (i = 0; i < channel_count; ++i)
@@ -179,10 +182,11 @@ xsigtool_redraw_channels(display_t *disp, const struct xsig_interface *iface)
           iface->wf->params.x + b,
           iface->wf->params.y + iface->wf->params.height - 1,
           0x7f00ff00);
+
       display_printf(
           disp,
-          iface->wf->params.x,
-          iface->wf->params.y + iface->wf->params.height + 3 + i * 8,
+          iface->s->params.x,
+          iface->s->params.y + iface->s->params.height + 3 + i * 8,
           OPAQUE(0x7f7f7f),
           OPAQUE(0),
           "Channel %d: %lg Hz (bw: %lg Hz)",
@@ -198,6 +202,7 @@ main(int argc, char *argv[])
   su_modem_t *modem = NULL;
   struct xsig_constellation_params cons_params = xsig_constellation_params_INITIALIZER;
   struct xsig_waterfall_params wf_params;
+  struct xsig_spectrum_params s_params;
   struct xsig_channel_detector_params cd_params =
       xsig_channel_detector_params_INITIALIZER;
   xsig_constellation_t *cons = NULL;
@@ -277,6 +282,27 @@ main(int argc, char *argv[])
     exit(EXIT_FAILURE);
   }
 
+  s_params.fft_size = 256;
+  s_params.width = 512;
+  s_params.height = 128;
+  s_params.x = 3;
+  s_params.y = 133 + wf_params.height + 4;
+
+  /*
+   * Scale factor is measured in height units / dB: This means that
+   * 0 dBFS will be on top of the spectrum graph and -100 dBFS on
+   * the bottom. Reference level of 0 dBFS can be adjusted with
+   * the ref parameter.
+   */
+  s_params.scale = 1. / 128.;
+  s_params.alpha = 1e-1;
+  s_params.ref = 0; /* Value in dBFS of the top level of the spectrum graph */
+
+  if ((interface.s = xsig_spectrum_new(&s_params)) == NULL) {
+    fprintf(stderr, "%s: cannot create spectrum\n", argv[0]);
+    exit(EXIT_FAILURE);
+  }
+
   cd_params.samp_rate = instance->samp_rate;
   cd_params.alpha = 1e-2;
 
@@ -301,6 +327,7 @@ main(int argc, char *argv[])
     if (++count % cons_params.history_size == 0) {
       xsig_constellation_redraw(cons, disp);
       xsig_waterfall_redraw(interface.wf, disp);
+      xsig_spectrum_redraw(interface.s, disp);
       xsigtool_redraw_channels(disp, &interface);
       display_printf(
           disp,

@@ -39,6 +39,7 @@ struct xsig_source {
   uint64_t samp_rate;
   SNDFILE *sf;
   SUFLOAT *window;
+  SUFLOAT *queued;
   XSIG_FFTW(_plan) fft_plan;
   XSIG_FFTW(_complex) *fft;
   SUSCOUNT avail;

@@ -19,6 +19,7 @@
 */
 
 #include <sigutils/sampling.h>
+#include <sigutils/taps.h>
 #include <assert.h>
 
 #include "chandetect.h"
@@ -300,6 +301,11 @@ xsig_channel_detector_feed(xsig_channel_detector_t *detector, SUCOMPLEX samp)
 
   if (detector->ptr == detector->params.window_size) {
     detector->ptr = 0;
+
+    /* Apply window function. TODO: precalculate */
+    su_taps_apply_hann_complex(
+        detector->window,
+        detector->params.window_size);
 
     /* Window is full, perform FFT */
     XSIG_FFTW(_execute(detector->fft_plan));

@@ -21,6 +21,8 @@
 #include <string.h>
 #include "source.h"
 
+#include <sigutils/taps.h>
+
 SUPRIVATE SUBOOL xsig_source_block_class_registered = SU_FALSE;
 
 SUPRIVATE void
@@ -66,6 +68,9 @@ xsig_source_destroy(struct xsig_source *source)
   if (source->window != NULL)
     fftw_free(source->window);
 
+  if (source->queued != NULL)
+    fftw_free(source->queued);
+
   if (source->fft != NULL)
     fftw_free(source->fft);
 
@@ -96,6 +101,12 @@ xsig_source_new(const struct xsig_source_params *params)
   new->samp_rate = new->info.samplerate;
 
   if ((new->window = fftw_malloc(params->window_size * sizeof(SUFLOAT)))
+      == NULL) {
+    SU_ERROR("cannot allocate memory for FFT window\n");
+    goto fail;
+  }
+
+  if ((new->queued = fftw_malloc(params->window_size * sizeof(SUFLOAT)))
       == NULL) {
     SU_ERROR("cannot allocate memory for read window\n");
     goto fail;
@@ -131,7 +142,7 @@ xsig_source_read(struct xsig_source *source)
 {
   return XSIG_SNDFILE_READ(
       source->sf,
-      source->window,
+      source->queued,
       source->params.window_size) == source->params.window_size;
 }
 
@@ -144,6 +155,14 @@ xsig_source_acquire(struct xsig_source *source)
   }
 
   source->avail = source->params.window_size;
+
+  memcpy(
+      source->window,
+      source->queued,
+      source->params.window_size * sizeof (SUFLOAT));
+
+  su_taps_apply_hann(source->window, source->params.window_size);
+
   XSIG_FFTW(_execute(source->fft_plan));
 
   if (source->params.onacquire != NULL)
@@ -223,7 +242,7 @@ xsig_source_block_acquire(void *private, su_stream_t *out, su_block_port_t *in)
 
   /* Convert data */
   for (i = 0; i < size; ++i)
-    start[i] = (SUCOMPLEX) source->window[i + ptr];
+    start[i] = (SUCOMPLEX) source->queued[i + ptr];
 
   /* Advance in stream */
   if (su_stream_advance_contiguous(out, size) != size) {
