@@ -295,7 +295,7 @@ main(int argc, char *argv[])
    * the ref parameter.
    */
   s_params.scale = 1. / 128.;
-  s_params.alpha = 1e-1;
+  s_params.alpha = 1e-2;
   s_params.ref = 0; /* Value in dBFS of the top level of the spectrum graph */
 
   if ((interface.s = xsig_spectrum_new(&s_params)) == NULL) {

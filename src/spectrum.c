@@ -91,9 +91,14 @@ void
 xsig_spectrum_redraw(const xsig_spectrum_t *s, display_t *disp)
 {
   int i, j, old_j;
+  int chan_start;
   int x, y_1, y_2;
   SUFLOAT K = 1.  / s->params.fft_size;
   SUFLOAT dBFS;
+  SUFLOAT noise_floor = INFINITY;
+  SUFLOAT channel_threshold;
+  SUFLOAT signal_ceil = -INFINITY;
+  SUBOOL in_channel = SU_FALSE;
 
   box(
       disp,
@@ -111,7 +116,44 @@ xsig_spectrum_redraw(const xsig_spectrum_t *s, display_t *disp)
       s->params.y + s->params.height,
       OPAQUE(0x000000));
 
+  /* Search should start at lowest point */
+
+  for (i = 0; i < s->params.width; ++i)
+    if (s->fft[i] < noise_floor)
+      noise_floor = s->fft[i];
+
+  for (i = 0; i < s->params.width; ++i)
+    if (s->fft[i] > signal_ceil)
+      signal_ceil = s->fft[i];
+
+
+  /* TODO: compute channel threshold based on dynamic range */
+  /* TODO: Try removing the signal_ceil reference and use
+   * a squelch level based on a proportion of the dynamic range
+   */
+  channel_threshold = .15 * signal_ceil + .85 * noise_floor;
+
   for (i = 0; i < s->params.width; ++i) {
+    channel_threshold += 1 * (.1 * signal_ceil + .90 * noise_floor - channel_threshold);
+
+    if (!in_channel) {
+      if (s->fft[i] > channel_threshold) {
+        in_channel = SU_TRUE;
+        chan_start = i;
+      } else
+        noise_floor += .05 * (s->fft[i] - noise_floor);
+    } else {
+      /*
+       * Don't immediately leave the channel. Assume guard bands,
+       * require xxx Hz of continuous low SNR to assume that the channel
+       * is over. Add these xxx Hz to the beginning of the channel.
+       */
+      if (s->fft[i] < channel_threshold)
+        in_channel = SU_FALSE;
+      else
+        signal_ceil += .05 * (s->fft[i] - signal_ceil);
+    }
+
     dBFS = SU_DB_RAW(s->fft[i] * K);
 
     j = s->params.height * s->params.scale
@@ -131,7 +173,7 @@ xsig_spectrum_redraw(const xsig_spectrum_t *s, display_t *disp)
             : (old_j >= s->params.height
                 ? s->params.height - 1
                 : old_j);
-        box(
+        line(
             disp,
             s->params.x + i,
             s->params.y + y_1,
@@ -140,6 +182,21 @@ xsig_spectrum_redraw(const xsig_spectrum_t *s, display_t *disp)
             OPAQUE(0x00ff00));
       }
 
+    pset_abs(
+        disp,
+        s->params.x + i,
+        s->params.y + s->params.height * s->params.scale
+        * (1. - SU_DB_RAW(channel_threshold * K) + s->params.ref),
+        OPAQUE(0xff0000));
+
+    if (in_channel)
+      line(
+          disp,
+          s->params.x + i,
+          s->params.y + 1,
+          s->params.x + i,
+          s->params.y + s->params.height,
+          0x3fff0000);
     old_j = j;
   }
 }
