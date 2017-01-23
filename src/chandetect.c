@@ -71,6 +71,20 @@ xsig_channel_detector_channel_list_clear(xsig_channel_detector_t *detector)
   detector->channel_list  = NULL;
 }
 
+SUPRIVATE void
+xsig_channel_detector_channel_collect(xsig_channel_detector_t *detector)
+{
+  unsigned int i;
+
+  for (i = 0; i < detector->channel_count; ++i)
+    if (detector->channel_list[i] != NULL)
+      if (detector->channel_list[i]->age++
+          > 2 * detector->channel_list[i]->present) {
+        free(detector->channel_list[i]);
+        detector->channel_list[i] = NULL;
+      }
+}
+
 struct xsig_channel *
 xsig_channel_detector_lookup_channel(
     const xsig_channel_detector_t *detector,
@@ -99,18 +113,24 @@ xsig_channel_detector_assert_channel(
     if ((chan = malloc(sizeof (struct xsig_channel))) == NULL)
       return SU_FALSE;
 
-    chan->bw = bw;
-    chan->fc = fc;
-    chan->snr = snr;
+    chan->bw      = bw;
+    chan->fc      = fc;
+    chan->snr     = snr;
+    chan->age     = 0;
+    chan->present = 0;
 
     if (PTR_LIST_APPEND_CHECK(detector->channel, chan) == -1) {
       free(chan);
       return SU_FALSE;
     }
-  } else
-    if (bw > chan->bw)
-      chan->bw = bw;
 
+  } else {
+    chan->present++;
+
+    /* The older the channel is, the harder it must be to change its params */
+    chan->bw += 1. / (chan->age + 1) * (bw - chan->bw);
+    chan->fc += 1. / (chan->age + 1) * (fc - chan->fc);
+  }
   return SU_TRUE;
 }
 
@@ -128,6 +148,9 @@ xsig_channel_detector_destroy(xsig_channel_detector_t *detector)
 
   if (detector->averaged_fft != NULL)
     free(detector->averaged_fft);
+
+  if (detector->threshold != NULL)
+    free(detector->threshold);
 
   xsig_channel_detector_channel_list_clear(detector);
 
@@ -179,10 +202,16 @@ xsig_channel_detector_new(const struct xsig_channel_detector_params *params)
   }
 
   if ((new->averaged_fft
-        = calloc(params->window_size, sizeof(SUFLOAT))) == NULL) {
-      SU_ERROR("cannot allocate memory for averaged FFT\n");
-      goto fail;
-    }
+      = calloc(params->window_size, sizeof(SUFLOAT))) == NULL) {
+    SU_ERROR("cannot allocate memory for averaged FFT\n");
+    goto fail;
+  }
+
+  if ((new->threshold
+      = calloc(params->window_size, sizeof(SUFLOAT))) == NULL) {
+    SU_ERROR("cannot allocate memory for threshold\n");
+    goto fail;
+  }
 
   if ((new->fft_plan = XSIG_FFTW(_plan_dft_1d)(
       params->window_size,
@@ -214,43 +243,61 @@ fail:
 SUPRIVATE SUBOOL
 xsig_channel_perform_discovery(xsig_channel_detector_t *detector)
 {
-  int i;
-  SUBOOL in_channel = SU_FALSE;
-  SUFLOAT min = INFINITY;
-  SUFLOAT max = -INFINITY;
+  unsigned int i;
+  unsigned int f0;
+
+  SUFLOAT N0; /* Noise level */
+  SUFLOAT S0; /* Signal level */
+  SUBOOL  c;  /* Channel flag */
 
   SUFLOAT chan_start;
   SUFLOAT chan_end;
-  SUFLOAT curr_max;
 
-  /* Analyze signal's dynamic range */
-  for (i = 0; i < detector->params.window_size; ++i) {
-    if (detector->averaged_fft[i] < min)
-      min = detector->averaged_fft[i];
+  for (i = 0; i < detector->params.window_size; ++i)
+    if (SU_ABS(detector->averaged_fft[i]) < N0)
+      N0 = SU_ABS(detector->averaged_fft[i]);
 
-    if (detector->averaged_fft[i] > max)
-      max = detector->averaged_fft[i];
-  }
+  for (i = 0; i < detector->params.window_size; ++i)
+    if (SU_ABS(detector->averaged_fft[i]) > S0)
+      S0 = SU_ABS(detector->averaged_fft[i]);
 
-  curr_max = .15 * max + .85 * min;
+  /* This is usually a good start */
+  S0 /= 4;
 
-  if (++detector->iters > 1. / detector->params.alpha) {
-    xsig_channel_detector_channel_list_clear(detector);
+  if (++detector->iters > .1 / detector->params.alpha) {
+    /* Skip negative frequencies */
+    for (i = 0; i < detector->params.window_size / 2; ++i) {
+      detector->threshold[i] +=
+          detector->params.th_alpha *
+          (detector->params.rel_squelch * S0
+              + (1 - detector->params.rel_squelch) * N0
+                - detector->threshold[i]);
 
-    for (i = 0; i < (detector->params.window_size >> 1); ++i) {
-      if (detector->averaged_fft[i] > curr_max) {
-        if (!in_channel) {
+      if (!c) {
+        /* Not in channel, update noise level */
+        N0 +=
+            detector->params.alpha * (SU_ABS(detector->averaged_fft[i]) - N0);
+
+        if (SU_ABS(detector->averaged_fft[i]) > detector->threshold[i]) {
+          c = SU_TRUE;
           chan_start = SU_NORM2ABS_FREQ(
               detector->params.samp_rate * detector->params.decimation,
               2 * (SUFLOAT) i / (SUFLOAT) detector->params.window_size);
-          in_channel = SU_TRUE;
         }
       } else {
-        if (in_channel) {
+        /* In channel, update signal level */
+        S0 +=
+            detector->params.alpha * (SU_ABS(detector->averaged_fft[i]) - S0);
+        /*
+         * Tip: Don't leave the channel immediately. Assume guard bands,
+         * require xxx Hz of continuous low SNR to assume that the channel
+         * is over. Add these xxx Hz to the beginning of the channel.
+         */
+        if (SU_ABS(detector->averaged_fft[i]) <= detector->threshold[i]) {
+          c = SU_FALSE;
           chan_end = SU_NORM2ABS_FREQ(
               detector->params.samp_rate * detector->params.decimation,
               2 * (SUFLOAT) i / (SUFLOAT) detector->params.window_size);
-
           if (!xsig_channel_detector_assert_channel(
               detector,
               .5 * (chan_end + chan_start),
@@ -259,11 +306,10 @@ xsig_channel_perform_discovery(xsig_channel_detector_t *detector)
             SU_ERROR("Failed to register a channel\n");
             return SU_FALSE;
           }
-
-          in_channel = SU_FALSE;
         }
       }
     }
+    xsig_channel_detector_channel_collect(detector);
   }
 
   return SU_TRUE;

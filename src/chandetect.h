@@ -37,10 +37,15 @@ struct xsig_channel_detector_params {
   enum xsig_channel_detector_mode mode;
   unsigned int samp_rate;   /* Sample rate */
   unsigned int window_size; /* Window size == FFT bins */
-  SUFLOAT alpha;            /* Damping factor */
   SUFLOAT fc;               /* Center frequency */
   unsigned int decimation;
   unsigned int max_order;   /* Max constellation order */
+
+  /* Detector parameters */
+  SUFLOAT alpha;            /* FFT averaging ratio */
+  SUFLOAT beta;             /* Signal & Noise level update ratio */
+  SUFLOAT rel_squelch;      /* Relative squelch level */
+  SUFLOAT th_alpha;         /* Threshold level averaging ratio */
 };
 
 #define xsig_channel_detector_params_INITIALIZER \
@@ -48,10 +53,13 @@ struct xsig_channel_detector_params {
   XSIG_CHANNEL_DETECTOR_MODE_DISCOVERY, /* Mode */ \
   8000, /* samp_rate */   \
   512,  /* window_size */ \
-  0.25, /* alpha */       \
   0.0,  /* fc */          \
   1,    /* decimation */  \
   8,    /* max_order */   \
+  0.25, /* alpha */       \
+  0.25, /* beta */        \
+  0.3,  /* rel_squelch */ \
+  .5,   /* th_alpha */    \
 }
 
 
@@ -59,6 +67,8 @@ struct xsig_channel {
   SUFLOAT fc;
   SUFLOAT bw;
   SUFLOAT snr;
+  unsigned int age;
+  unsigned int present;
 };
 
 struct xsig_channel_detector {
@@ -69,6 +79,7 @@ struct xsig_channel_detector {
   XSIG_FFTW(_plan) fft_plan;
   XSIG_FFTW(_complex) *fft;
   SUFLOAT *averaged_fft;
+  SUFLOAT *threshold;
   unsigned int decim_ptr;
   unsigned int ptr; /* Sample in window */
   unsigned int iters;

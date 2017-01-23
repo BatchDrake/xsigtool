@@ -148,6 +148,7 @@ xsigtool_redraw_channels(display_t *disp, const struct xsig_interface *iface)
   unsigned int channel_count;
   unsigned int i;
   unsigned int a, b;
+  unsigned int n = 0;
 
   xsig_channel_detector_get_channel_list(
       iface->cd,
@@ -163,7 +164,7 @@ xsigtool_redraw_channels(display_t *disp, const struct xsig_interface *iface)
       OPAQUE(0));
 
   for (i = 0; i < channel_count; ++i)
-    if (channel_list[i] != NULL) {
+    if (channel_list[i] != NULL && channel_list[i]->age > 20) {
       a = iface->wf->params.width
           * SU_ABS2NORM_FREQ(
               iface->cd->params.samp_rate,
@@ -186,13 +187,14 @@ xsigtool_redraw_channels(display_t *disp, const struct xsig_interface *iface)
       display_printf(
           disp,
           iface->s->params.x,
-          iface->s->params.y + iface->s->params.height + 3 + i * 8,
+          iface->s->params.y + iface->s->params.height + 3 + n * 8,
           OPAQUE(0x7f7f7f),
           OPAQUE(0),
           "Channel %d: %lg Hz (bw: %lg Hz)",
-          i,
+          n,
           channel_list[i]->fc,
           channel_list[i]->bw);
+      ++n;
     }
 }
 
@@ -295,7 +297,7 @@ main(int argc, char *argv[])
    * the ref parameter.
    */
   s_params.scale = 1. / 128.;
-  s_params.alpha = 1e-2;
+  s_params.alpha = 5e-3;
   s_params.ref = 0; /* Value in dBFS of the top level of the spectrum graph */
 
   if ((interface.s = xsig_spectrum_new(&s_params)) == NULL) {
