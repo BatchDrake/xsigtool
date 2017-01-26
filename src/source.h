@@ -27,6 +27,8 @@
 struct xsig_source;
 
 struct xsig_source_params {
+  SUBOOL raw_iq;
+  unsigned int samp_rate;
   const char *file;
   SUSCOUNT window_size;
   void *private;
@@ -38,9 +40,14 @@ struct xsig_source {
   SF_INFO info;
   uint64_t samp_rate;
   SNDFILE *sf;
-  SUFLOAT *window;
-  SUFLOAT *queued;
+
+  union {
+    SUFLOAT *as_real;
+    SUCOMPLEX *as_complex;
+  };
+
   XSIG_FFTW(_plan) fft_plan;
+  XSIG_FFTW(_complex) *window;
   XSIG_FFTW(_complex) *fft;
   SUSCOUNT avail;
 };

@@ -27,6 +27,15 @@
 
 #include <xsigtool.h>
 
+#define XSIG_CHANNEL_DETECTOR_MIN_MAJORITY_AGE 20 /* in FFT runs */
+#define XSIG_CHANNEL_DETECTOR_MIN_SNR          6  /* in DBs */
+#define XSIG_CHANNEL_DETECTOR_MIN_BW           10 /* in Hz */
+
+#define XSIG_CHANNEL_IS_VALID(cp)                               \
+        ((cp)->age > XSIG_CHANNEL_DETECTOR_MIN_MAJORITY_AGE     \
+      && (cp)->snr > XSIG_CHANNEL_DETECTOR_MIN_SNR              \
+      && (cp)->bw  > XSIG_CHANNEL_DETECTOR_MIN_BW)
+
 enum xsig_channel_detector_mode {
   XSIG_CHANNEL_DETECTOR_MODE_DISCOVERY,       /* Discover channels */
   XSIG_CHANNEL_DETECTOR_MODE_CYCLOSTATIONARY, /* To find baudrate */

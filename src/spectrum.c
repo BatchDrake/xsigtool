@@ -97,7 +97,8 @@ xsig_spectrum_redraw(const xsig_spectrum_t *s, display_t *disp)
 {
   int i, j, old_j;
   int x, y_1, y_2;
-  SUFLOAT K = 1.  / s->params.fft_size;
+  unsigned int halfsize = s->params.fft_size / 2;
+  SUFLOAT K = 1. / s->params.fft_size;
   SUFLOAT dBFS;
 
   box(
@@ -117,7 +118,8 @@ xsig_spectrum_redraw(const xsig_spectrum_t *s, display_t *disp)
       OPAQUE(0x000000));
 
   for (i = 0; i < s->params.width; ++i) {
-    dBFS = SU_DB_RAW(s->fft[i] * K);
+    /* TODO: Adjust FFT index to width */
+    dBFS = SU_DB_RAW(s->fft[(i + halfsize) % s->params.fft_size] * K);
 
     j = s->params.height * s->params.scale
             * (1. - dBFS + s->params.ref);

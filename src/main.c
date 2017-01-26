@@ -62,6 +62,12 @@ su_modem_set_xsig_source(
   params.private = NULL;
   params.window_size = 512;
   params.onacquire = xsigtool_onacquire;
+  params.raw_iq = SU_FALSE;
+
+  if (strcmp(path + strlen(path) - 4, ".raw") == 0) {
+    params.raw_iq = SU_TRUE;
+    params.samp_rate = 250000;
+  }
 
   if ((xsig_source_block = xsig_source_create_block(&params)) == NULL)
     goto fail;
@@ -149,6 +155,8 @@ xsigtool_redraw_channels(display_t *disp, const struct xsig_interface *iface)
   unsigned int i;
   unsigned int a, b;
   unsigned int n = 0;
+  SUFLOAT expand;
+  unsigned int halfsize = iface->wf->params.fft_size / 2;
 
   xsig_channel_detector_get_channel_list(
       iface->cd,
@@ -163,26 +171,31 @@ xsigtool_redraw_channels(display_t *disp, const struct xsig_interface *iface)
       iface->s->params.y + iface->s->params.height + 2 + 8 * 8,
       OPAQUE(0));
 
+  expand = .5 * (SUFLOAT) iface->wf->params.width /
+           (SUFLOAT) iface->wf->params.fft_size;
   for (i = 0; i < channel_count; ++i)
-    if (channel_list[i] != NULL && channel_list[i]->age > 20) {
-      a = iface->wf->params.width
+    if (channel_list[i] != NULL && XSIG_CHANNEL_IS_VALID(channel_list[i])) {
+      a = expand * iface->wf->params.width
           * SU_ABS2NORM_FREQ(
               iface->cd->params.samp_rate,
               iface->cd->params.decimation
               * (channel_list[i]->fc - channel_list[i]->bw * .5));
-      b = iface->wf->params.width
+      b = expand * iface->wf->params.width
           * SU_ABS2NORM_FREQ(
               iface->cd->params.samp_rate,
               iface->cd->params.decimation
               * (channel_list[i]->fc + channel_list[i]->bw * .5));
 
+      a = (a + halfsize) % iface->wf->params.fft_size;
+      b = (b + halfsize) % iface->wf->params.fft_size;
+
       fbox(
           disp,
-          iface->wf->params.x + a,
-          iface->wf->params.y + 1,
-          iface->wf->params.x + b,
-          iface->wf->params.y + iface->wf->params.height - 1,
-          0x7f00ff00);
+          iface->s->params.x + a,
+          iface->s->params.y + 1,
+          iface->s->params.x + b,
+          iface->s->params.y + iface->wf->params.height - 1,
+          0x7fff0000);
 
       display_printf(
           disp,
@@ -190,10 +203,11 @@ xsigtool_redraw_channels(display_t *disp, const struct xsig_interface *iface)
           iface->s->params.y + iface->s->params.height + 3 + n * 8,
           OPAQUE(0x7f7f7f),
           OPAQUE(0),
-          "Channel %d: %lg Hz (bw: %lg Hz)",
+          "Channel %d: %lg Hz (bw: %lg Hz) / SNR: %lg dBFS",
           n,
           channel_list[i]->fc,
-          channel_list[i]->bw);
+          channel_list[i]->bw,
+          channel_list[i]->snr);
       ++n;
     }
 }
@@ -273,7 +287,7 @@ main(int argc, char *argv[])
     exit(EXIT_FAILURE);
   }
 
-  wf_params.fft_size = 256;
+  wf_params.fft_size = 512;
   wf_params.width = 512;
   wf_params.height = 128;
   wf_params.x = 3;
@@ -284,7 +298,7 @@ main(int argc, char *argv[])
     exit(EXIT_FAILURE);
   }
 
-  s_params.fft_size = 256;
+  s_params.fft_size = 512;
   s_params.width = 512;
   s_params.height = 128;
   s_params.x = 3;
@@ -306,7 +320,7 @@ main(int argc, char *argv[])
   }
 
   cd_params.samp_rate = instance->samp_rate;
-  cd_params.alpha = 1e-2;
+  cd_params.alpha = 1e-3;
 
   if ((interface.cd = xsig_channel_detector_new(&cd_params)) == NULL) {
     fprintf(stderr, "%s: cannot create channel detector\n", argv[0]);

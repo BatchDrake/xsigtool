@@ -35,6 +35,7 @@ struct xsig_waterfall {
   struct xsig_waterfall_params params;
   SUFLOAT **history;
   unsigned int ptr;
+  SUFLOAT k; /* dynamic atenuation */
 };
 
 typedef struct xsig_waterfall xsig_waterfall_t;

@@ -68,8 +68,8 @@ xsig_source_destroy(struct xsig_source *source)
   if (source->window != NULL)
     fftw_free(source->window);
 
-  if (source->queued != NULL)
-    fftw_free(source->queued);
+  if (source->as_real != NULL)
+    fftw_free(source->as_real);
 
   if (source->fft != NULL)
     fftw_free(source->fft);
@@ -82,8 +82,19 @@ xsig_source_new(const struct xsig_source_params *params)
 {
   struct xsig_source *new = NULL;
 
+  if (params->raw_iq && (params->window_size & 1)) {
+    SU_ERROR("Window size must be an even number of I/Q data files\n");
+    goto fail;
+  }
+
   if ((new = calloc(1, sizeof (struct xsig_source))) == NULL)
     goto fail;
+
+  if (params->raw_iq) {
+    new->info.format = SF_FORMAT_RAW | SF_FORMAT_FLOAT | SF_ENDIAN_LITTLE;
+    new->info.channels = 2;
+    new->info.samplerate = params->samp_rate;
+  }
 
   if (!xsig_source_params_copy(&new->params, params)) {
     SU_ERROR("failed to copy source params\n");
@@ -92,21 +103,21 @@ xsig_source_new(const struct xsig_source_params *params)
 
   if ((new->sf = sf_open(params->file, SFM_READ, &new->info)) == NULL) {
     SU_ERROR(
-        "failed to open `%s': %s\n",
+        "failed to open `%s': error %s\n",
         params->file,
-        sf_error(NULL));
+        sf_strerror(NULL));
     goto fail;
   }
 
   new->samp_rate = new->info.samplerate;
 
-  if ((new->window = fftw_malloc(params->window_size * sizeof(SUFLOAT)))
+  if ((new->window = fftw_malloc(params->window_size * sizeof(SUCOMPLEX)))
       == NULL) {
     SU_ERROR("cannot allocate memory for FFT window\n");
     goto fail;
   }
 
-  if ((new->queued = fftw_malloc(params->window_size * sizeof(SUFLOAT)))
+  if ((new->as_real = fftw_malloc(params->window_size * sizeof(SUFLOAT)))
       == NULL) {
     SU_ERROR("cannot allocate memory for read window\n");
     goto fail;
@@ -119,10 +130,11 @@ xsig_source_new(const struct xsig_source_params *params)
     goto fail;
   }
 
-  if ((new->fft_plan = XSIG_FFTW(_plan_dft_r2c_1d)(
+  if ((new->fft_plan = XSIG_FFTW(_plan_dft_1d)(
       params->window_size,
       new->window,
       new->fft,
+      FFTW_FORWARD,
       FFTW_ESTIMATE)) == NULL) {
     SU_ERROR("failed to create FFT plan\n");
     goto fail;
@@ -142,13 +154,29 @@ xsig_source_read(struct xsig_source *source)
 {
   return XSIG_SNDFILE_READ(
       source->sf,
-      source->queued,
+      source->as_real,
       source->params.window_size) == source->params.window_size;
+}
+
+/* I'm doing this only because I want to save a buffer */
+SUPRIVATE void
+xsig_source_complete_acquire(struct xsig_source *source)
+{
+  su_taps_apply_hann_complex(source->window, source->params.window_size);
+
+  XSIG_FFTW(_execute(source->fft_plan));
+
+  if (source->params.onacquire != NULL)
+    (source->params.onacquire)(source, source->params.private);
+
 }
 
 SUBOOL
 xsig_source_acquire(struct xsig_source *source)
 {
+  unsigned int i;
+  unsigned int size;
+
   if (!xsig_source_read(source)) {
     SU_ERROR("read failed\n");
     return SU_FALSE;
@@ -156,17 +184,32 @@ xsig_source_acquire(struct xsig_source *source)
 
   source->avail = source->params.window_size;
 
-  memcpy(
-      source->window,
-      source->queued,
-      source->params.window_size * sizeof (SUFLOAT));
+  if (source->info.channels == 1) {
+    /* In the real case, samples must be copied one at a time */
+    for (i = 0; i < source->params.window_size; ++i)
+      source->window[i] = (SUCOMPLEX) source->as_real[i];
+  } else {
+    /*
+     * We can do this dirty hack because we assume that a SUCOMPLEX is
+     * exactly two SUFLOATs in size.
+     */
+    size = source->params.window_size >> 1;
+    memcpy(
+        source->window,
+        source->as_complex,
+        size * sizeof (SUCOMPLEX));
 
-  su_taps_apply_hann(source->window, source->params.window_size);
+    /* Retrieve other half */
+    if (!xsig_source_read(source)) {
+      SU_ERROR("read failed\n");
+      return SU_FALSE;
+    }
 
-  XSIG_FFTW(_execute(source->fft_plan));
-
-  if (source->params.onacquire != NULL)
-    (source->params.onacquire)(source, source->params.private);
+    memcpy(
+        source->window + size,
+        source->as_complex,
+        size * sizeof (SUCOMPLEX));
+  }
 
   return SU_TRUE;
 }
@@ -240,9 +283,11 @@ xsig_source_block_acquire(void *private, su_stream_t *out, su_block_port_t *in)
 
   ptr = source->params.window_size - source->avail;
 
-  /* Convert data */
-  for (i = 0; i < size; ++i)
-    start[i] = (SUCOMPLEX) source->queued[i + ptr];
+  /*
+   * No need to convert the data anymore. Also, we can perform this
+   * copy directly because the FFT windowing function is not applied yet
+   * */
+  memcpy(start, source->window + ptr, size * sizeof (SUCOMPLEX));
 
   /* Advance in stream */
   if (su_stream_advance_contiguous(out, size) != size) {
@@ -252,6 +297,14 @@ xsig_source_block_acquire(void *private, su_stream_t *out, su_block_port_t *in)
 
   /* Mark these samples as consumed */
   source->avail -= size;
+
+  /*
+   * Finish acquisition process by updating FFT. This will alter the contents
+   * of the window buffer and should not be used anymore until the next
+   * window is read.
+   */
+  if (source->avail == 0)
+    xsig_source_complete_acquire(source);
 
   return size;
 }

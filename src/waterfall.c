@@ -62,6 +62,7 @@ xsig_waterfall_new(const struct xsig_waterfall_params *params) {
       goto fail;
 
   new->params = *params;
+  new->k = 0.5;
 
   return new;
 
@@ -79,12 +80,16 @@ xsig_waterfall_feed(xsig_waterfall_t *wf, const SUCOMPLEX *s) {
   unsigned int s_i;
   SUFLOAT s_index;
   SUFLOAT t;
+  SUFLOAT S0 = 0; /* Signal ceiling */
 
   for (i = 0; i < wf->params.width; ++i) {
     s_index = (SUFLOAT) i / (SUFLOAT) (wf->params.width - 1)
         * (SUFLOAT) (wf->params.fft_size - 1);
     s_i = (unsigned int) floor(s_index);
     t = s_index - s_i;
+
+    if (SU_C_ABS(s[s_i]) > S0)
+      S0 = SU_C_ABS(s[s_i]);
 
     wf->history[wf->ptr][i] =
         s_i == wf->params.fft_size - 1
@@ -94,6 +99,9 @@ xsig_waterfall_feed(xsig_waterfall_t *wf, const SUCOMPLEX *s) {
 
   if (++wf->ptr == wf->params.height)
     wf->ptr = 0;
+
+  if (S0 > 0)
+    wf->k += 5e-2 * (1. / S0 - wf->k);
 }
 
 SUPRIVATE SUFLOAT
@@ -119,6 +127,9 @@ xsig_waterfall_redraw(const xsig_waterfall_t *wf, display_t *disp)
 {
   unsigned int i, j;
   unsigned int row;
+  unsigned int halfsize;
+  halfsize = wf->params.fft_size / 2;
+
   box(
       disp,
       wf->params.x,
@@ -127,6 +138,7 @@ xsig_waterfall_redraw(const xsig_waterfall_t *wf, display_t *disp)
       wf->params.y + wf->params.height + 1,
       OPAQUE(0x7f7f7f));
 
+  /* TODO: Adjust FFT index to width */
   for (j = 0; j < wf->params.height; ++j) {
     row = (j + wf->ptr) % wf->params.height;
     for (i = 0; i < wf->params.width; ++i)
@@ -134,7 +146,9 @@ xsig_waterfall_redraw(const xsig_waterfall_t *wf, display_t *disp)
           disp,
           i + wf->params.x + 1,
           j + wf->params.y + 1,
-          OPAQUE(calc_color_wf(.5 * wf->history[row][i])));
+          OPAQUE(calc_color_wf(
+              wf->k * wf->history[row][(i + halfsize)
+                                       % wf->params.fft_size])));
   }
 }
 
