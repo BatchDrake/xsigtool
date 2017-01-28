@@ -9,6 +9,5 @@ xsigtool_LDFLAGS = @GLOBAL_LDFLAGS@
 xsigtool_LDADD = ../sim-static/libsim.la ../util/libutil.la @GLOBAL_LDFLAGS@ \
 	@fftw3_LIBS@ @sndfile_LIBS@ @asoundlib_LIBS@ -lfftw3f -lfftw3l
 
-xsigtool_SOURCES = chandetect.c chandetect.h constellation.c constellation.h \
-	main.c source.c source.h spectrum.c spectrum.h waterfall.c waterfall.h     \
-	xsigtool.h
+xsigtool_SOURCES = constellation.c constellation.h 	main.c source.c source.h \
+spectrum.c spectrum.h waterfall.c waterfall.h xsigtool.h

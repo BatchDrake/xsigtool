@@ -16,13 +16,12 @@
 #include <sigutils/iir.h>
 #include <sigutils/agc.h>
 #include <sigutils/pll.h>
-
+#include <sigutils/detect.h>
 #include <sigutils/sigutils.h>
 
 #include "constellation.h"
 #include "waterfall.h"
 #include "source.h"
-#include "chandetect.h"
 #include "spectrum.h"
 
 #define SCREEN_WIDTH  640
@@ -31,7 +30,7 @@
 struct xsig_interface {
   xsig_waterfall_t *wf;
   xsig_spectrum_t *s;
-  xsig_channel_detector_t *cd;
+  su_channel_detector_t *cd;
 };
 
 SUPRIVATE void
@@ -44,7 +43,7 @@ xsigtool_onacquire(struct xsig_source *source, void *private)
   xsig_spectrum_feed(iface->s, source->fft);
 
   for (i = 0; i < source->params.window_size; ++i)
-    xsig_channel_detector_feed(iface->cd, source->window[i]);
+    su_channel_detector_feed(iface->cd, source->window[i]);
 }
 
 SUBOOL
@@ -150,7 +149,7 @@ xsig_modem_init(const char *file, struct xsig_source **instance)
 SUPRIVATE void
 xsigtool_redraw_channels(display_t *disp, const struct xsig_interface *iface)
 {
-  struct xsig_channel **channel_list;
+  struct sigutils_channel **channel_list;
   unsigned int channel_count;
   unsigned int i;
   unsigned int a, b;
@@ -158,7 +157,7 @@ xsigtool_redraw_channels(display_t *disp, const struct xsig_interface *iface)
   SUFLOAT expand;
   unsigned int halfsize = iface->wf->params.fft_size / 2;
 
-  xsig_channel_detector_get_channel_list(
+  su_channel_detector_get_channel_list(
       iface->cd,
       &channel_list,
       &channel_count);
@@ -174,7 +173,7 @@ xsigtool_redraw_channels(display_t *disp, const struct xsig_interface *iface)
   expand = .5 * (SUFLOAT) iface->wf->params.width /
            (SUFLOAT) iface->wf->params.fft_size;
   for (i = 0; i < channel_count; ++i)
-    if (channel_list[i] != NULL && XSIG_CHANNEL_IS_VALID(channel_list[i])) {
+    if (channel_list[i] != NULL && SU_CHANNEL_IS_VALID(channel_list[i])) {
       a = expand * iface->wf->params.width
           * SU_ABS2NORM_FREQ(
               iface->cd->params.samp_rate,
@@ -219,8 +218,8 @@ main(int argc, char *argv[])
   struct xsig_constellation_params cons_params = xsig_constellation_params_INITIALIZER;
   struct xsig_waterfall_params wf_params;
   struct xsig_spectrum_params s_params;
-  struct xsig_channel_detector_params cd_params =
-      xsig_channel_detector_params_INITIALIZER;
+  struct sigutils_channel_detector_params cd_params =
+      sigutils_channel_detector_params_INITIALIZER;
   xsig_constellation_t *cons = NULL;
   textarea_t *area;
   display_t *disp;
@@ -322,7 +321,7 @@ main(int argc, char *argv[])
   cd_params.samp_rate = instance->samp_rate;
   cd_params.alpha = 1e-3;
 
-  if ((interface.cd = xsig_channel_detector_new(&cd_params)) == NULL) {
+  if ((interface.cd = su_channel_detector_new(&cd_params)) == NULL) {
     fprintf(stderr, "%s: cannot create channel detector\n", argv[0]);
     exit(EXIT_FAILURE);
   }
